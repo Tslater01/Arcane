@@ -1,0 +1,20 @@
+ 
+# Python virtual environment
+.venv/
+
+# Python cache
+__pycache__/
+*.pyc
+
+# Secrets
+.env
+
+# DVC cache (DVC tracks this itself)
+.dvc/cache
+
+# IDE files
+.vscode/
+.idea/
+
+# Experiment outputs (we will track the final CSV with DVC)
+outputs/

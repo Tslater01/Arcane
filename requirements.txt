@@ -1,0 +1,18 @@
+# Baselines & APIs
+openai
+
+# Experimentation & Analysis
+hydra-core
+pandas
+seaborn
+matplotlib
+jupyter
+
+# Data & Model Versioning
+dvc[s3]
+
+# SonarQube Communication
+requests
+
+# Utilities
+python-dotenv

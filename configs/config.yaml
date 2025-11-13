@@ -1,0 +1,32 @@
+# Path to our test benchmark, managed by DVC
+paths:
+  test_benchmark: "data/benchmarks/quikbugs"
+
+# SonarCloud Configuration
+sonar:
+  host_url: "https://sonarcloud.io"
+  organization: "tslater01" 
+  project_key: "arcane-jss-paper" 
+
+# Prompts for our PlannerAgent
+prompts:
+  plan_1: >
+    You are a 10x Staff Engineer.
+    Baseline Metrics:
+    {baseline_metrics_json}
+    Vulnerable Code:
+    ```cpp
+    {vulnerable_code}
+    ```
+    Your task is to brainstorm 3 distinct strategies to fix this...
+
+  plan_2: >
+    You are a 10x Staff Engineer.
+    Vulnerable Code:
+    ```cpp
+    {vulnerable_code}
+    ```
+    Context:
+    {strategy_analysis_text}
+
+    Select the *best* strategy...
