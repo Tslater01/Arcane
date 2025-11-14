@@ -1,0 +1,6 @@
+outs:
+- md5: bf4754c67c97c5635f21acd4d1a60ac8.dir
+  size: 973683
+  nfiles: 418
+  hash: md5
+  path: QuixBugs
