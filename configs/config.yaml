@@ -1,32 +1,69 @@
 # Path to our test benchmark, managed by DVC
 paths:
-  test_benchmark: "data/benchmarks/quikbugs"
+  test_benchmark: "data/benchmarks/QuixBugs"
 
 # SonarCloud Configuration
 sonar:
   host_url: "https://sonarcloud.io"
-  organization: "tslater01" 
-  project_key: "arcane-jss-paper" 
+  organization: "tslater01"
+  project_key: "arcane-jss-paper"
 
 # Prompts for our PlannerAgent
 prompts:
+  # The prompt for the FIRST attempt
   plan_1: >
     You are a 10x Staff Engineer.
     Baseline Metrics:
     {baseline_metrics_json}
     Vulnerable Code:
-    ```cpp
+    ```java
     {vulnerable_code}
     ```
-    Your task is to brainstorm 3 distinct strategies to fix this...
+    Your task is to brainstorm 3 distinct strategies to fix this
+    vulnerability. For each strategy, provide a brief description
+    and a "pro/con" analysis focused on maintainability,
+    readability, and long-term technical debt.
 
+  # The prompt for the FIRST attempt (second half of the CoT)
   plan_2: >
     You are a 10x Staff Engineer.
     Vulnerable Code:
-    ```cpp
+    ```java
     {vulnerable_code}
     ```
     Context:
     {strategy_analysis_text}
 
-    Select the *best* strategy...
+    Select the *best* strategy that prioritizes correctness and
+    long-term maintainability.
+
+    Now, generate *only* the full, complete, and syntactically
+    correct code for the patch. Do not add any explanation.
+    Your output must be 100% valid code.
+
+  # --- NEW PROMPT FOR THE RETRY LOOP ---
+  # This is the prompt for attempts 2 and 3
+  prompt_plan_3_retry: >
+    You are a 10x Staff Engineer debugging a failed patch.
+    Your previous attempt was incorrect and failed validation.
+
+    Here is the original vulnerable code:
+    ```java
+    {vulnerable_code}
+    ```
+
+    Here is the patch you generated, which FAILED:
+    ```java
+    {failed_patch}
+    ```
+
+    Here is the **pristine Java stack trace** from the test harness.
+    This error was caused by YOUR failed patch.
+    ```
+    {error_message}
+    ```
+
+    Your task is to respond in three parts:
+    1.  In a `<thinking>` block, analyze the stack trace. What line number caused the error? What is the logical cause?
+    2.  In a `<plan>` block, describe your new strategy to fix this.
+    3.  In a `<patch>` block, provide *only* the full, complete, and syntactically correct code for the new patch.

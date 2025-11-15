@@ -3,24 +3,22 @@ import subprocess
 import time
 import requests
 import logging
+from pathlib import Path
 from dotenv import load_dotenv
 
-# Set up a simple logger
+# Import our new shared utility
+from .utils import compile_with_gradle
+
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 log = logging.getLogger(__name__)
 
-# Load secret keys (SONAR_TOKEN) from our .env file
 load_dotenv()
 
 SONAR_METRICS = "technical_debt,cognitive_complexity,code_smells,vulnerabilities"
 
-def run_analysis(code_directory, config):
+def run_analysis(code_directory: Path, config):
     """
     Runs a full SonarCloud analysis on a directory and returns the metrics.
-
-    :param code_directory: The full path to the code to be analyzed.
-    :param config: The Hydra config object.
-    :return: A dictionary of metrics, or None if analysis fails.
     """
     log.info(f"--- 1. ANALYZE: Starting SonarCloud scan on {code_directory} ---")
     
@@ -36,39 +34,47 @@ def run_analysis(code_directory, config):
         return None
 
     try:
-        # Step 1: Run the scanner and get the task URL for polling
-        ce_task_url = _run_scanner(code_directory, project_key, organization, host_url, sonar_token)
+        benchmark_dir = code_directory.parent 
         
-        # Step 2: Poll the task URL until the analysis is complete
-        _wait_for_task_completion(ce_task_url, sonar_token)
+        if not compile_with_gradle(benchmark_dir):
+            raise Exception("Gradle build failed, cannot proceed with Sonar analysis.")
+
+        ce_task_url = _run_scanner(code_directory, benchmark_dir, project_key, organization, host_url, sonar_token)
         
-        # Step 3: Call the SonarCloud Web API to get the final results
+        if not ce_task_url:
+            log.warning("Could not find ceTaskUrl. Waiting 15s as a fallback.")
+            time.sleep(15)
+        else:
+            _wait_for_task_completion(ce_task_url, sonar_token)
+        
         log.info("Fetching metrics from SonarCloud API...")
         metrics = _get_scan_results(project_key, organization, sonar_token)
         
         log.info(f"--- ANALYZE complete. Metrics found: {metrics} ---")
         return metrics
         
-    except subprocess.CalledProcessError as e:
-        log.error(f"Sonar-scanner execution failed: {e.stderr}")
-    except requests.RequestException as e:
-        log.error(f"API request failed: {e}")
     except Exception as e:
         log.error(f"An unexpected error occurred during analysis: {e}")
     
     return None
 
 
-def _run_scanner(code_dir, project_key, org, host_url, token):
+def _run_scanner(code_dir: Path, benchmark_dir: Path, project_key, org, host_url, token):
     """Helper function to run the sonar-scanner CLI tool."""
     
+    binary_path = benchmark_dir / "build" / "classes" / "java" / "main"
+    test_binary_path = benchmark_dir / "build" / "classes" / "java" / "test"
+
     command = [
         "sonar-scanner",
         f"-Dsonar.projectKey={project_key}",
         f"-Dsonar.organization={org}",
         f"-Dsonar.sources=.",
         f"-Dsonar.host.url={host_url}",
-        f"-Dsonar.login={token}"
+        f"-Dsonar.login={token}",
+        f"-Dsonar.java.binaries={binary_path}",
+        f"-Dsonar.java.test.binaries={test_binary_path}",
+        "-Dsonar.log.level=INFO"
     ]
     
     log.info("Starting sonar-scanner process...")
@@ -78,12 +84,11 @@ def _run_scanner(code_dir, project_key, org, host_url, token):
         cwd=code_dir,
         capture_output=True,
         text=True,
-        check=True # This will raise CalledProcessError if returncode is not 0
+        check=True
     )
     
     log.info("Sonar-scanner run successful.")
     
-    # Find the task URL in the scanner's output
     ce_task_url = None
     for line in result.stdout.splitlines():
         if "ceTaskUrl" in line:
@@ -91,9 +96,9 @@ def _run_scanner(code_dir, project_key, org, host_url, token):
             break
             
     if not ce_task_url:
-        raise Exception("Could not find ceTaskUrl in scanner output. Analysis may have failed silently.")
+        log.warning("Could not find ceTaskUrl in scanner output.")
+        log.debug(f"Full scanner output: {result.stdout}")
         
-    log.info(f"Analysis task URL: {ce_task_url}")
     return ce_task_url
 
 
@@ -102,7 +107,7 @@ def _wait_for_task_completion(task_url, token):
     
     log.info("Waiting for SonarCloud to process the report...")
     start_time = time.time()
-    timeout_seconds = 300  # 5 minutes
+    timeout_seconds = 300
     
     while True:
         if time.time() - start_time > timeout_seconds:
@@ -124,7 +129,7 @@ def _wait_for_task_completion(task_url, token):
         except requests.RequestException as e:
             log.error(f"Error polling task status: {e}. Retrying...")
         
-        time.sleep(5) # Poll every 5 seconds
+        time.sleep(5)
 
 
 def _get_scan_results(project_key, org, token):
@@ -149,6 +154,6 @@ def _get_scan_results(project_key, org, token):
         metrics[metric_name] = metric_value
             
     if not metrics:
-        log.warning("SonarCloud API returned no metrics. Check project key.")
+        log.warning("SonarCloud API returned no metrics. Check SonarCloud dashboard.")
         
     return metrics

@@ -35,42 +35,39 @@ class BaseBaselineAgent(ABC):
             original_code = bug_path.read_text(encoding="utf-8")
         except Exception as e:
             log.error(f"Failed to read bug file at {bug_path}: {e}")
-            return self._create_result(algorithm_name, "FAIL_LOAD", None, None)
+            return self._create_result(algorithm_name, "FAIL_LOAD")
 
-        # --- PLAN (P) ---
-        # This is the only part that changes per agent
         patch_code = self._get_patch(original_code)
         
         if not patch_code:
             log.error(f"{self.agent_name} plan failed to generate a patch.")
-            return self._create_result(algorithm_name, "FAIL_PLAN", None, None)
+            return self._create_result(algorithm_name, "FAIL_PLAN")
 
-        # --- EXECUTE (E) ---
-        validation_result = run_validation(patch_code, str(bug_path), algorithm_name)
+        # --- THIS IS THE FIX ---
+        # Unpack the tuple and save both status and error
+        validation_status, error_message = run_validation(patch_code, str(bug_path), algorithm_name)
         
-        final_metrics_dict = None
-        if validation_result == PASS:
-            log.info("Patch passed. Running final analysis for RQ2...")
-            # We run analysis on the *parent* of the file (the .../java_programs/ dir)
-            final_metrics_dict = run_analysis(bug_path.parent, self.config)
-        
+        # If we passed, the error message is None
+        if validation_status == PASS:
+            error_message = None
+
         return self._create_result(
             algorithm_name, 
-            validation_result, 
-            None,  # Baselines don't have "before" metrics
-            final_metrics_dict,
-            patch_code if validation_result == PASS else None
+            validation_status, 
+            patch_code if validation_status == PASS else None,
+            error_message # Save the error message
         )
 
-    def _create_result(self, algo_name, status, before_metrics, after_metrics, patch=None):
+    def _create_result(self, algo_name, status, patch=None, error=None):
         """Helper to format the final result dictionary."""
         return {
             "agent": self.agent_name,
             "algorithm": algo_name,
             "status": status,
             "patch": patch,
-            "metrics_before": before_metrics,
-            "metrics_after": after_metrics
+            "metrics_before": None,
+            "metrics_after": None,
+            "error_message": error
         }
 
 
