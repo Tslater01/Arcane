@@ -5,6 +5,7 @@ import pandas as pd
 from pathlib import Path
 from omegaconf import DictConfig
 from typing import List, Tuple, Set
+from tqdm import tqdm  # <-- 1. IMPORT TQDM
 
 # --- Project-level Imports ---
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
@@ -15,8 +16,10 @@ if str(SRC_PATH) not in sys.path:
 try:
     from arcane.agent import ArcaneAgent
     from arcane.baselines import BaselineNaive, BaselineAware
-except ImportError:
-    print("FATAL: Could not import arcane modules. Is 'src' in your PYTHONPATH?")
+except ImportError as e:
+    print(f"FATAL: Could not import arcane modules: {e}")
+    print("This is likely because you are running from the wrong directory.")
+    print("Please run this script from the main 'ARCANE' project root.")
     sys.exit(1)
 
 # --- Configuration ---
@@ -30,48 +33,39 @@ logging.basicConfig(
 log = logging.getLogger(__name__)
 
 RESULTS_FILE = "results.csv"
-JAVA_PROGRAMS_DIR = "java_programs"
 JSON_TESTCASES_DIR = "json_testcases"
+PYTHON_PROGRAMS_DIR = "python_programs"
 RESULTS_COLUMNS = [
     "agent", "algorithm", "status", "patch", 
-    "metrics_before", "metrics_after"
+    "metrics_before", "metrics_after", "error_message"
 ]
 
 def load_benchmark(benchmark_path: Path) -> List[Tuple[str, Path]]:
     """
-    Finds all valid, runnable bugs in the QuixBugs benchmark.
+    Finds all valid, runnable Python bugs in the QuixBugs benchmark.
     """
     json_dir = benchmark_path / JSON_TESTCASES_DIR
-    java_dir = benchmark_path / JAVA_PROGRAMS_DIR
+    py_dir = benchmark_path / PYTHON_PROGRAMS_DIR
     bugs_to_run = []
 
-    if not json_dir.exists() or not java_dir.exists():
+    if not json_dir.exists() or not py_dir.exists():
         log.error(f"Benchmark directories not found at {benchmark_path}")
         return []
 
     for json_file in json_dir.glob("*.json"):
         algorithm_name_lower = json_file.stem 
-        java_file_name = algorithm_name_lower.upper() + ".java"
-        java_file_path = java_dir / java_file_name
+        py_file_name = algorithm_name_lower + ".py"
+        py_file_path = py_dir / py_file_name
         
-        if java_file_path.exists():
-            bugs_to_run.append((algorithm_name_lower, java_file_path))
+        if py_file_path.exists():
+            bugs_to_run.append((algorithm_name_lower, py_file_path))
         else:
-            log.warning(f"Found test {json_file.name} but missing Java file: {java_file_name}")
+            log.warning(f"Found test {json_file.name} but missing Python file: {py_file_name}")
             
     log.info(f"Found {len(bugs_to_run)} total valid bugs.")
-
-    # --- TEST RUN MODIFICATION ---
-    # We will only run on a few bugs to test the full pipeline.
-    test_bug_names = ["bitcount", "knapsack"]
-    test_bugs = []
-    for bug in bugs_to_run:
-        if bug[0] in test_bug_names:
-            test_bugs.append(bug)
-            
-    log.warning(f"*** TEST RUN ACTIVE: Only processing {len(test_bugs)} bugs: {test_bug_names} ***")
-    return test_bugs
-    # --- END TEST RUN MODIFICATION ---
+    
+    # --- Full Run ---
+    return bugs_to_run
 
 
 def load_processed_bugs(results_path: Path) -> Set[Tuple[str, str]]:
@@ -108,6 +102,7 @@ def run_evaluation(cfg: DictConfig):
     """
     Main experiment script orchestrated by Hydra.
     """
+    
     original_cwd = Path(hydra.utils.get_original_cwd())
     benchmark_path = original_cwd / cfg.paths.test_benchmark
     results_path = Path.cwd() / RESULTS_FILE 
@@ -125,28 +120,47 @@ def run_evaluation(cfg: DictConfig):
         BaselineNaive(cfg)
     ]
     
-    for algorithm_name, bug_file_path in all_bugs:
-        log.info(f"========== Processing Bug: {algorithm_name} ==========")
+    # --- 2. BUILD THE MASTER TASK LIST ---
+    # Create a master list of all (bug, agent) pairs
+    all_tasks = [
+        (algorithm_name, bug_file_path, agent)
+        for (algorithm_name, bug_file_path) in all_bugs
+        for agent in agents
+    ]
+    
+    # Filter out tasks that are already processed
+    tasks_to_run = []
+    for algorithm_name, bug_file_path, agent in all_tasks:
+        if (agent.agent_name, algorithm_name) in processed_bugs:
+            log.info(f"Skipping {agent.agent_name} for {algorithm_name} (already processed).")
+        else:
+            tasks_to_run.append((algorithm_name, bug_file_path, agent))
+            
+    log.info(f"Total tasks: {len(all_tasks)}. Remaining tasks: {len(tasks_to_run)}")
+    
+    # --- 3. RUN THE MAIN LOOP WITH TQDM ---
+    # Wrap 'tasks_to_run' with tqdm for a progress bar
+    for algorithm_name, bug_file_path, agent in tqdm(tasks_to_run, desc="Overall Experiment Progress"):
         
-        for agent in agents:
-            agent_name = agent.agent_name
+        log.info(f"========== Processing Bug: {algorithm_name} | Agent: {agent.agent_name} ==========")
+        agent_name = agent.agent_name
+        
+        try:
+            # Run the full fix/validation loop
+            result = agent.run_fix(bug_file_path, algorithm_name)
             
-            if (agent_name, algorithm_name) in processed_bugs:
-                log.info(f"Skipping {agent_name} for {algorithm_name} (already processed).")
-                continue
+            # Save the result immediately
+            save_result(results_path, result)
             
-            try:
-                result = agent.run_fix(bug_file_path, algorithm_name)
-                save_result(results_path, result)
-                
-            except Exception as e:
-                log.error(f"CRITICAL ERROR running {agent_name} on {algorithm_name}: {e}", exc_info=True)
-                result = {
-                    "agent": agent_name, 
-                    "algorithm": algorithm_name, 
-                    "status": "CRASH"
-                }
-                save_result(results_path, result)
+        except Exception as e:
+            # Catch any critical errors during an agent's run
+            log.error(f"CRITICAL ERROR running {agent_name} on {algorithm_name}: {e}", exc_info=True)
+            result = {
+                "agent": agent_name, 
+                "algorithm": algorithm_name, 
+                "status": "CRASH"
+            }
+            save_result(results_path, result)
 
     log.info("========== Evaluation Complete ==========")
     log.info(f"All results saved to: {results_path}")

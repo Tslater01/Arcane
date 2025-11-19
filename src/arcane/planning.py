@@ -1,7 +1,7 @@
 import os
 import re
 import logging
-from typing import Optional  # <-- THIS IS THE FIX
+from typing import Optional  # <-- This was the missing import
 from openai import OpenAI
 from dotenv import load_dotenv
 
@@ -27,7 +27,7 @@ def run_plan(code: str, metrics_json: str, config):
 
     try:
         prompt_1 = config.prompts.plan_1.format(
-            baseline_metrics_json=metrics_json or "N/A",
+            baseline_metrics_json=metrics_json or "N/A", # Will be N/A
             vulnerable_code=code
         )
         strategy_analysis = _call_openai_api(prompt_1)
@@ -70,13 +70,11 @@ def run_retry_plan(original_code: str, failed_patch: str, error_message: str, co
             error_message=error_message
         )
         
-        # Call the API with the new CoT prompt
         full_cot_response = _call_openai_api(prompt_3, temperature=0.3)
         
         if not full_cot_response:
             raise Exception("Retry Plan failed to return any content.")
             
-        # Parse the <patch> block from the response
         new_patch = _extract_cot_patch(full_cot_response)
 
         if not new_patch:
@@ -108,10 +106,8 @@ def _call_openai_api(prompt_content: str, extract_code: bool = False, temperatur
             return None
         
         if extract_code:
-            # Simple extraction for plan_2
             return _extract_simple_patch(content)
         else:
-            # Return the full CoT response
             return content.strip()
 
     except Exception as e:
@@ -120,13 +116,13 @@ def _call_openai_api(prompt_content: str, extract_code: bool = False, temperatur
 
 
 def _extract_simple_patch(content: str) -> Optional[str]:
-    """Extracts a simple ```java ... ``` block."""
+    """Extracts a simple ```python ... ``` block."""
     if "```" in content:
         parts = content.split("```")
         if len(parts) > 1:
             code_block = parts[1]
-            if code_block.lower().startswith("java\n"):
-                code_block = code_block[5:]
+            if code_block.lower().startswith("python\n"):
+                code_block = code_block[7:]
             return code_block.strip()
     log.warning("No ``` code block found in API response. Returning raw content.")
     return content.strip()
@@ -135,11 +131,9 @@ def _extract_simple_patch(content: str) -> Optional[str]:
 def _extract_cot_patch(content: str) -> Optional[str]:
     """Extracts the <patch>...</patch> block from a CoT response."""
     try:
-        # Regex to find everything between <patch> and </patch>
         match = re.search(r"<patch>(.*?)</patch>", content, re.DOTALL | re.IGNORECASE)
         if match:
             patch_content = match.group(1).strip()
-            # A final cleanup in case it *still* includes ```java
             return _extract_simple_patch(patch_content)
         
         log.warning("No <patch> block found. Falling back to simple extraction.")
