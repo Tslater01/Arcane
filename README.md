@@ -1,6 +1,6 @@
 # ARCANE
 
-This repository contains the official replication package and source code for the research paper: **"Autonomic Framework for Vulnerability Repair and Technical Debt Reduction using Language Models."**
+This repository contains the replication package and source code for the research paper: **"Autonomic Framework for Vulnerability Repair and Technical Debt Reduction using Language Models."**
 
 ARCANE is an experimental software agent designed to autonomously fix logical bugs in Java programs. It uses a Monitor-Analyze-Plan-Execute (MAPE-K) loop to iteratively generate patches, validate them against test suites, and analyze architectural metrics using SonarCloud.
 
